@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+{% block title %}Entry {{ entry.id[:8] }} — Work Log Editor{% endblock %}
+
+{% block content %}
+<div class="detail-header">
+    <a href="/" class="btn btn-sm">← Back to list</a>
+    <h1>Entry {{ entry.id[:8] }}…</h1>
+    <div class="detail-meta">
+        <span>Created: {{ entry.created_at | format_datetime }}</span>
+        <span>Updated: {{ entry.updated_at | format_datetime }}</span>
+        <span class="badge badge-source-{{ entry.context_source }}">{{ entry.context_source }}</span>
+        {% if entry.is_private %}<span class="badge badge-private">private</span>{% endif %}
+        {% if entry.errors %}<span class="badge badge-error">has errors</span>{% endif %}
+    </div>
+</div>
+
+<!-- Audio Player -->
+{% if entry.audio_path %}
+<div class="section">
+    <h3>Audio</h3>
+    <audio controls preload="metadata">
+        <source src="file:///{{ entry.audio_path | replace('\\', '/') }}" type="audio/wav">
+        Audio playback not available in browser (local file). File: {{ entry.audio_path }}
+    </audio>
+    <small>{{ entry.audio_path }}</small>
+    {% if entry.audio_sha256 %}<br><small>SHA-256: {{ entry.audio_sha256[:16] }}…</small>{% endif %}
+</div>
+{% endif %}
+
+<!-- Edit Form -->
+<form method="post" action="/entry/{{ entry.id }}/save" id="edit-form" onsubmit="clearDirty()">
+    <div class="section">
+        <h3>Raw Transcript</h3>
+        <textarea name="transcript_raw" rows="5" class="full-width" onchange="markDirty()">{{ entry.transcript_raw or '' }}</textarea>
+        {% if entry.transcript_confidence is not none %}
+        <small>Confidence: {{ "%.2f" | format(entry.transcript_confidence) }}</small>
+        {% endif %}
+    </div>
+
+    <div class="section">
+        <h3>Cleaned Note</h3>
+        <textarea name="cleaned_note" rows="8" class="full-width" onchange="markDirty()">{{ entry.cleaned_note or '' }}</textarea>
+    </div>
+
+    <div class="section">
+        <h3>Project / Client</h3>
+        <div class="filter-row">
+            <label>Project
+                <select name="toggl_project_name" id="project-select" onchange="projectChanged(this)">
+                    <option value="">— none —</option>
+                    {% for p in projects_list %}
+                    <option value="{{ p.project_name }}"
+                        data-project-id="{{ p.project_id }}"
+                        data-client-name="{{ p.client_name }}"
+                        data-workspace-id="{{ p.workspace_id }}"
+                        {% if p.project_name == entry.toggl_project_name %}selected{% endif %}>
+                        {{ p.client_name or '(no client)' }} → {{ p.project_name }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </label>
+            <input type="hidden" name="toggl_project_id" id="project-id" value="{{ entry.toggl_project_id or '' }}">
+            <input type="hidden" name="toggl_client_name" id="client-name" value="{{ entry.toggl_client_name or '' }}">
+            <input type="hidden" name="toggl_workspace_id" id="workspace-id" value="{{ entry.toggl_workspace_id or '' }}">
+        </div>
+        <small>Current: {{ entry.toggl_client_name or '—' }} / {{ entry.toggl_project_name or '—' }}</small>
+    </div>
+
+    <div class="section">
+        <h3>Tags</h3>
+        <div class="tag-checkboxes">
+            {% set current_tags = entry.tags %}
+            {% for t in tags_list %}
+            <label class="tag-label">
+                <input type="checkbox" name="tags" value="{{ t }}" onchange="markDirty()"
+                    {% if t in current_tags %}checked{% endif %}>
+                <span class="badge badge-{{ t }}">{{ t }}</span>
+            </label>
+            {% endfor %}
+        </div>
+    </div>
+
+    <div class="section">
+        <label class="tag-label">
+            <input type="checkbox" name="is_private" onchange="markDirty()"
+                {% if entry.is_private %}checked{% endif %}>
+            <span class="badge badge-private">Private</span> (exclude from compiled reports)
+        </label>
+    </div>
+
+    <div class="action-bar">
+        <button type="submit" class="btn btn-primary">Save Changes</button>
+        <form method="post" action="/entry/{{ entry.id }}/set-last-context" style="display:inline">
+            <button type="submit" class="btn btn-sm">Set as Last Context</button>
+        </form>
+    </div>
+</form>
+
+<!-- Retry Actions -->
+<div class="section">
+    <h3>Actions</h3>
+    <div class="action-bar">
+        {% if entry.audio_path %}
+        <form method="post" action="/entry/{{ entry.id }}/retry-transcribe" style="display:inline">
+            <button type="submit" class="btn btn-sm">Retry Transcription</button>
+        </form>
+        {% endif %}
+        {% if entry.transcript_raw %}
+        <form method="post" action="/entry/{{ entry.id }}/retry-llm" style="display:inline">
+            <button type="submit" class="btn btn-sm">Retry LLM Cleanup</button>
+        </form>
+        {% endif %}
+        <form method="post" action="/entry/{{ entry.id }}/delete" style="display:inline"
+              onsubmit="return confirm('Delete this entry permanently?')">
+            <button type="submit" class="btn btn-danger btn-sm">Delete Entry</button>
+        </form>
+    </div>
+</div>
+
+<!-- Errors -->
+{% if entry.errors %}
+<div class="section">
+    <h3>Errors</h3>
+    <pre class="error-box">{{ entry.error_json }}</pre>
+</div>
+{% endif %}
+
+<!-- Context JSON -->
+{% if entry.capture_context_json %}
+<details class="section">
+    <summary>Capture Context (raw)</summary>
+    <pre>{{ entry.capture_context_json }}</pre>
+</details>
+{% endif %}
+
+<!-- Edit History -->
+{% if edits %}
+<details class="section">
+    <summary>Edit History ({{ edits | length }})</summary>
+    <table class="edit-table">
+        <thead>
+            <tr><th>Time</th><th>Field</th><th>Old</th><th>New</th></tr>
+        </thead>
+        <tbody>
+            {% for edit in edits %}
+            <tr>
+                <td>{{ edit.edited_at | format_datetime }}</td>
+                <td>{{ edit.field }}</td>
+                <td class="note-cell">{{ (edit.old_value or '—')[:80] }}</td>
+                <td class="note-cell">{{ (edit.new_value or '—')[:80] }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</details>
+{% endif %}
+
+<div style="margin-top: 1rem">
+    <small>Full ID: {{ entry.id }}</small>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function projectChanged(sel) {
+    const opt = sel.options[sel.selectedIndex];
+    document.getElementById('project-id').value = opt.dataset.projectId || '';
+    document.getElementById('client-name').value = opt.dataset.clientName || '';
+    document.getElementById('workspace-id').value = opt.dataset.workspaceId || '';
+    markDirty();
+}
+</script>
+{% endblock %}

@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+{% block title %}Entries — Work Log Editor{% endblock %}
+
+{% block content %}
+<h1>Log Entries</h1>
+
+<!-- Filters -->
+<details class="filter-panel" open>
+    <summary>Filters</summary>
+    <form method="get" action="/" class="filter-form">
+        <div class="filter-row">
+            <label>From <input type="date" name="date_from" value="{{ filters.date_from }}"></label>
+            <label>To <input type="date" name="date_to" value="{{ filters.date_to }}"></label>
+            <label>Client
+                <select name="client">
+                    <option value="">All</option>
+                    {% for c in clients %}
+                    <option value="{{ c }}" {% if filters.client == c %}selected{% endif %}>{{ c }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label>Project
+                <select name="project">
+                    <option value="">All</option>
+                    {% for p in projects %}
+                    <option value="{{ p }}" {% if filters.project == p %}selected{% endif %}>{{ p }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+        </div>
+        <div class="filter-row">
+            <label>Tag
+                <select name="tag">
+                    <option value="">All</option>
+                    {% for t in tags_list %}
+                    <option value="{{ t }}" {% if filters.tag == t %}selected{% endif %}>{{ t }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label>Keyword <input type="text" name="keyword" value="{{ filters.keyword }}" placeholder="search..."></label>
+            <label>Context Source
+                <select name="context_source">
+                    <option value="">All</option>
+                    {% for cs in context_sources %}
+                    <option value="{{ cs }}" {% if filters.context_source == cs %}selected{% endif %}>{{ cs }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label>Errors
+                <select name="has_errors">
+                    <option value="">All</option>
+                    <option value="yes" {% if filters.has_errors == 'yes' %}selected{% endif %}>Has errors</option>
+                    <option value="no" {% if filters.has_errors == 'no' %}selected{% endif %}>No errors</option>
+                </select>
+            </label>
+            <button type="submit" class="btn">Filter</button>
+            <a href="/" class="btn btn-secondary">Clear</a>
+        </div>
+    </form>
+</details>
+
+<!-- Bulk Operations -->
+<details class="bulk-panel">
+    <summary>Bulk Operations</summary>
+    <form method="post" action="/bulk/reassign" id="bulk-form">
+        <input type="hidden" name="entry_ids" id="bulk-entry-ids" value="">
+        <div class="filter-row">
+            <label>Reassign to Project
+                <select name="toggl_project_name" id="bulk-project-select" onchange="bulkProjectChanged(this)">
+                    <option value="">— keep current —</option>
+                    {% for p in projects %}
+                    <option value="{{ p }}">{{ p }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <input type="hidden" name="toggl_project_id" id="bulk-project-id">
+            <input type="hidden" name="toggl_client_name" id="bulk-client-name">
+            <input type="hidden" name="toggl_workspace_id" id="bulk-workspace-id">
+            <label>Tags
+                <select name="bulk_tags" multiple size="3">
+                    {% for t in tags_list %}
+                    <option value="{{ t }}">{{ t }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label><input type="checkbox" name="bulk_is_private" value="on"> Private</label>
+            <button type="submit" class="btn" onclick="return confirmBulk()">Apply to Selected</button>
+        </div>
+    </form>
+</details>
+
+<!-- Merge Tool -->
+<details class="bulk-panel">
+    <summary>Merge Tool</summary>
+    <form method="post" action="/merge">
+        <div class="filter-row">
+            <label>Primary ID <input type="text" name="primary_id" placeholder="UUID" size="36"></label>
+            <label>Secondary ID <input type="text" name="secondary_id" placeholder="UUID (will be deleted)" size="36"></label>
+            <button type="submit" class="btn btn-danger" onclick="return confirm('Merge entries? Secondary will be deleted.')">Merge</button>
+        </div>
+    </form>
+</details>
+
+<!-- Entry Table -->
+<table class="entry-table">
+    <thead>
+        <tr>
+            <th><input type="checkbox" id="select-all" onchange="toggleSelectAll(this)"></th>
+            <th>Time</th>
+            <th>Client</th>
+            <th>Project</th>
+            <th>Note</th>
+            <th>Tags</th>
+            <th>Source</th>
+            <th>Status</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for e in entries %}
+        <tr class="{% if e.is_private %}row-private{% endif %} {% if e.errors %}row-error{% endif %}">
+            <td><input type="checkbox" class="entry-checkbox" value="{{ e.id }}" onchange="updateBulkIds()"></td>
+            <td><a href="/entry/{{ e.id }}">{{ e.created_at | format_datetime }}</a></td>
+            <td>{{ e.toggl_client_name or '—' }}</td>
+            <td>{{ e.toggl_project_name or '—' }}</td>
+            <td class="note-cell">{{ (e.cleaned_note or e.transcript_raw or '(empty)')[:100] }}</td>
+            <td>
+                {% for tag in e.tags %}
+                <span class="badge badge-{{ tag }}">{{ tag }}</span>
+                {% endfor %}
+            </td>
+            <td><span class="badge badge-source-{{ e.context_source }}">{{ e.context_source }}</span></td>
+            <td>
+                {% if e.is_private %}<span class="badge badge-private">private</span>{% endif %}
+                {% if e.errors %}<span class="badge badge-error">errors</span>{% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+        {% if not entries %}
+        <tr><td colspan="8" class="empty-state">No entries found.</td></tr>
+        {% endif %}
+    </tbody>
+</table>
+
+<!-- Pagination -->
+<div class="pagination">
+    {% if page > 1 %}
+    <a href="?page={{ page - 1 }}&date_from={{ filters.date_from }}&date_to={{ filters.date_to }}&client={{ filters.client }}&project={{ filters.project }}&tag={{ filters.tag }}&keyword={{ filters.keyword }}&context_source={{ filters.context_source }}&has_errors={{ filters.has_errors }}" class="btn btn-sm">← Previous</a>
+    {% endif %}
+    <span>Page {{ page }}</span>
+    {% if has_more %}
+    <a href="?page={{ page + 1 }}&date_from={{ filters.date_from }}&date_to={{ filters.date_to }}&client={{ filters.client }}&project={{ filters.project }}&tag={{ filters.tag }}&keyword={{ filters.keyword }}&context_source={{ filters.context_source }}&has_errors={{ filters.has_errors }}" class="btn btn-sm">Next →</a>
+    {% endif %}
+</div>
+{% endblock %}

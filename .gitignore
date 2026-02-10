@@ -1,0 +1,26 @@
+# Secrets
+.env
+config.yaml
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+
+# Pytest
+.pytest_cache/
+
+# Runtime data
+audio_captures/
+data/
+logs/
+reports/
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+
+# Claude Code
+.claude/

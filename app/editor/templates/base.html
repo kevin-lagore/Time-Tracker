@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Work Log Editor{% endblock %}</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <nav class="navbar">
+        <a href="/" class="nav-brand">Work Log</a>
+        <div class="nav-actions">
+            <form method="post" action="/refresh-toggl" style="display:inline">
+                <button type="submit" class="btn btn-sm">Refresh Toggl Cache</button>
+            </form>
+        </div>
+    </nav>
+    <main class="container">
+        {% if request.query_params.get('saved') %}
+        <div class="alert alert-success">Entry saved.</div>
+        {% endif %}
+        {% if request.query_params.get('deleted') %}
+        <div class="alert alert-success">Entry deleted.</div>
+        {% endif %}
+        {% if request.query_params.get('merged') %}
+        <div class="alert alert-success">Entries merged.</div>
+        {% endif %}
+        {% if request.query_params.get('bulk') %}
+        <div class="alert alert-success">Bulk operation complete.</div>
+        {% endif %}
+        {% if request.query_params.get('retried') %}
+        <div class="alert alert-success">Retry successful.</div>
+        {% endif %}
+        {% if request.query_params.get('context_set') %}
+        <div class="alert alert-success">Last context updated.</div>
+        {% endif %}
+        {% if request.query_params.get('toggl_refreshed') %}
+        <div class="alert alert-success">Toggl cache refreshed.</div>
+        {% endif %}
+        {% block content %}{% endblock %}
+    </main>
+    <script src="/static/app.js"></script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

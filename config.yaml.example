@@ -1,0 +1,47 @@
+# Push-to-Talk Work Log Configuration
+
+audio:
+  dir: ./audio_captures
+  format: wav
+  sample_rate: 16000
+  # ffmpeg input device name (run: ffmpeg -list_devices true -f dshow -i dummy)
+  # Leave blank to use system default
+  input_device: ""
+
+database:
+  path: ./data/worklog.db
+
+logging:
+  path: ./logs/app.log
+  level: INFO
+  max_bytes: 5242880  # 5MB
+  backup_count: 3
+
+toggl:
+  # Fallback window: if no running entry, look back this many minutes
+  recent_window_minutes: 15
+  # Cache TTL in hours (auto-refresh after this)
+  cache_ttl_hours: 24
+
+openai:
+  stt_model: whisper-1
+  # Language hint for Whisper (ISO-639-1), leave blank for auto
+  language: ""
+  # LLM model for cleanup and compilation
+  llm_model: gpt-4o-mini
+  # Temperature for LLM calls
+  llm_temperature: 0.2
+
+features:
+  # Enable LLM cleanup + tagging after transcription
+  llm_cleanup: true
+  # Enable LLM-assisted compilation
+  llm_compile: true
+
+editor:
+  host: 127.0.0.1
+  port: 8765
+
+hotkey:
+  # AHK hotkey for push-to-talk (used in AHK script config)
+  key: CapsLock
