@@ -66,6 +66,11 @@ def load_config() -> dict:
         },
         "features": {"llm_cleanup": True, "llm_compile": True},
         "editor": {"host": "127.0.0.1", "port": 8765},
+        "faster_whisper": {
+            "model_size": "base",
+            "device": "auto",
+            "compute_type": "default",
+        },
         "hotkey": {"key": "CapsLock"},
     }
 

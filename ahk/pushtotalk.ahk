@@ -8,20 +8,26 @@
 ; Path to project root (adjust if needed)
 ProjectRoot := A_ScriptDir "\.."
 
-; Python executable (use full path if not in PATH)
-PythonExe := "python"
+; Python executable — use venv Python so packages are found
+PythonExe := ProjectRoot "\.venv\Scripts\python.exe"
 
 ; Audio output directory
 AudioDir := ProjectRoot "\audio_captures"
 
 ; ============ END CONFIG ============
 
-; State
+; State — Work Log (CapsLock)
 IsRecording := false
 RecordPID := 0
 CurrentAudioFile := ""
 StopFile := ""
 LogFile := ProjectRoot "\logs\ahk.log"
+
+; State — Dictation (Backtick)
+IsDictating := false
+DictatePID := 0
+DictateAudioFile := ""
+DictateStopFile := ""  ; Uses same _stop_signal as recorder.py
 
 ; Ensure directories exist
 DirCreate(AudioDir)
@@ -61,7 +67,7 @@ StartRecording() {
     try FileDelete(ReadyFile)
 
     ; Launch Python recorder
-    cmd := A_ComSpec ' /c cd /d "' ProjectRoot '" && ' PythonExe ' -m app.recorder "' CurrentAudioFile '"'
+    cmd := A_ComSpec ' /c cd /d "' ProjectRoot '" && "' PythonExe '" -m app.recorder "' CurrentAudioFile '"'
     WriteLog("Starting recording: " cmd)
 
     try {
@@ -150,7 +156,7 @@ StopRecording() {
     WriteLog("Audio file size: " fileSize " bytes")
 
     ; Call Python capture pipeline
-    cmd := PythonExe ' -m app capture --audio "' CurrentAudioFile '"'
+    cmd := '"' PythonExe '" -m app capture --audio "' CurrentAudioFile '"'
     WriteLog("Running: " cmd)
 
     try {
@@ -203,7 +209,7 @@ SetCapsLockState("AlwaysOff")
 ^+e:: {
     global PythonExe, ProjectRoot
     try {
-        Run(A_ComSpec ' /c cd /d "' ProjectRoot '" && ' PythonExe ' -m app editor', , "Hide")
+        Run(A_ComSpec ' /c cd /d "' ProjectRoot '" && "' PythonExe '" -m app editor', , "Hide")
         Sleep(2000)
         Run("http://127.0.0.1:8765")
     } catch as e {
@@ -220,7 +226,7 @@ SetCapsLockState("AlwaysOff")
     today := FormatTime(, "yyyy-MM-dd")
     outFile := ProjectRoot "\reports\eod_" today ".html"
 
-    cmd := PythonExe ' -m app compile --date "' today '" --format html --out "' outFile '"'
+    cmd := '"' PythonExe '" -m app compile --date "' today '" --format html --out "' outFile '"'
     WriteLog("Running: " cmd)
 
     try {
@@ -249,7 +255,7 @@ SetCapsLockState("AlwaysOff")
     weekStr := SubStr(yw, 1, 4) "-W" SubStr(yw, 5, 2)
     outFile := ProjectRoot "\reports\eow_" weekStr ".html"
 
-    cmd := PythonExe ' -m app compile --week "' weekStr '" --format html --out "' outFile '"'
+    cmd := '"' PythonExe '" -m app compile --week "' weekStr '" --format html --out "' outFile '"'
     WriteLog("Running: " cmd)
 
     try {
@@ -268,6 +274,151 @@ SetCapsLockState("AlwaysOff")
     }
 }
 
+; ============ DICTATION (Backtick) ============
+
+; Start dictation recording
+StartDictation() {
+    global IsDictating, DictatePID, DictateAudioFile, AudioDir, PythonExe, ProjectRoot, DictateStopFile
+
+    if IsDictating
+        return
+
+    timestamp := FormatTime(, "yyyy-MM-dd_HH-mm-ss")
+    DictateAudioFile := AudioDir "\dictate_" timestamp ".wav"
+
+    ; Reuses same signal files as recorder.py expects
+    DictateStopFile := AudioDir "\_stop_signal"
+    ReadyFile := AudioDir "\_ready_signal"
+    try FileDelete(DictateStopFile)
+    try FileDelete(ReadyFile)
+
+    cmd := A_ComSpec ' /c cd /d "' ProjectRoot '" && "' PythonExe '" -m app.recorder "' DictateAudioFile '"'
+    WriteLog("Starting dictation: " cmd)
+
+    try {
+        Run(cmd, , "Hide", &DictatePID)
+        IsDictating := true
+        ShowToast("Dictating...", "Release key to transcribe")
+
+        waited := 0
+        loop {
+            if FileExist(ReadyFile)
+                break
+            if !ProcessExist(DictatePID) {
+                WriteLog("ERROR: Dictation recorder died during startup")
+                ShowToast("Error", "Dictation recorder failed", 4000)
+                IsDictating := false
+                return
+            }
+            Sleep(100)
+            waited += 100
+            if (waited >= 5000) {
+                WriteLog("WARNING: Dictation recorder ready timeout")
+                break
+            }
+        }
+
+        ShowToast("Dictating...", "Release key to transcribe")
+        WriteLog("Dictation ready after " waited "ms, PID=" DictatePID)
+    } catch as e {
+        WriteLog("ERROR starting dictation: " e.Message)
+        ShowToast("Error", "Dictation failed: " e.Message, 5000)
+    }
+}
+
+; Stop dictation, transcribe locally, copy to clipboard
+StopDictation() {
+    global IsDictating, DictatePID, DictateAudioFile, PythonExe, ProjectRoot, DictateStopFile
+
+    if !IsDictating
+        return
+
+    IsDictating := false
+    ShowToast("Transcribing...", "Please wait")
+    WriteLog("Stopping dictation, PID=" DictatePID)
+
+    ; Signal recorder to stop
+    try {
+        FileAppend("stop", DictateStopFile)
+    } catch as e {
+        WriteLog("Failed to write dictation stop signal: " e.Message)
+    }
+
+    ; Wait for recorder to exit
+    waited := 0
+    loop {
+        if !ProcessExist(DictatePID)
+            break
+        Sleep(200)
+        waited += 200
+        if (waited >= 5000) {
+            WriteLog("Dictation recorder did not exit, killing it")
+            try Run('taskkill /PID ' DictatePID ' /F /T', , "Hide")
+            Sleep(500)
+            break
+        }
+    }
+
+    ; Verify audio file
+    if !FileExist(DictateAudioFile) {
+        ShowToast("Error", "No audio captured", 3000)
+        WriteLog("ERROR: Dictation audio not created")
+        return
+    }
+
+    fileSize := FileGetSize(DictateAudioFile)
+    if (fileSize < 1000) {
+        ShowToast("Warning", "Audio too short", 3000)
+        WriteLog("WARNING: Dictation audio too small: " fileSize " bytes")
+        try FileDelete(DictateAudioFile)
+        return
+    }
+
+    ; Transcribe locally and capture stdout via temp file
+    outFile := A_Temp "\dictate_output.txt"
+    try FileDelete(outFile)
+
+    cmd := A_ComSpec ' /c cd /d "' ProjectRoot '" && "' PythonExe '" -m app dictate --audio "' DictateAudioFile '" > "' outFile '" 2>nul'
+    WriteLog("Running dictation: " cmd)
+
+    try {
+        result := RunWait(cmd, , "Hide")
+
+        if (result = 0) && FileExist(outFile) {
+            text := Trim(FileRead(outFile), " `t`n`r")
+            if (text != "") {
+                A_Clipboard := text
+                ShowToast("Copied!", SubStr(text, 1, 80), 3000)
+                WriteLog("Dictation copied to clipboard: " SubStr(text, 1, 100))
+            } else {
+                ShowToast("Warning", "No speech detected", 3000)
+                WriteLog("WARNING: Dictation returned empty text")
+            }
+        } else {
+            errMsg := FileExist(outFile) ? FileRead(outFile) : "Unknown error"
+            ShowToast("Error", "Transcription failed", 4000)
+            WriteLog("ERROR: Dictation failed (exit " result "): " errMsg)
+        }
+    } catch as e {
+        ShowToast("Error", "Dictation failed: " e.Message, 5000)
+        WriteLog("ERROR in dictation: " e.Message)
+    }
+
+    ; Clean up audio file (not needed for dictation)
+    try FileDelete(DictateAudioFile)
+    try FileDelete(outFile)
+}
+
+; Backtick (vkC0): hold to dictate, release to transcribe + clipboard
+*vkC0:: {
+    global IsDictating
+    if IsDictating
+        return
+    StartDictation()
+    KeyWait("vkC0")
+    StopDictation()
+}
+
 ; Startup notification
-ShowToast("Work Log Active", "CapsLock=Record | ^!D=EOD | ^!W=EOW | ^+E=Editor | ^+R=Stop", 5000)
+ShowToast("Work Log Active", "CapsLock=Record | Backtick=Dictate | ^!D=EOD | ^!W=EOW | ^+E=Editor | ^+R=Stop", 5000)
 WriteLog("=== Push-to-Talk Work Log started ===")

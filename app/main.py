@@ -461,6 +461,32 @@ def export(
 
 
 @app.command()
+def dictate(
+    audio: str = typer.Option(..., help="Path to audio file"),
+):
+    """Transcribe audio locally and print to stdout (for clipboard use)."""
+    setup_logging()
+
+    try:
+        audio_path = validate_audio(audio)
+    except (FileNotFoundError, ValueError) as e:
+        console.print(f"[red]Error:[/red] {e}", stderr=True)
+        raise typer.Exit(1)
+
+    try:
+        from app.local_stt import transcribe_local
+        text = transcribe_local(audio_path)
+        if text:
+            print(text)
+        else:
+            print("(no speech detected)", file=sys.stderr)
+            raise typer.Exit(1)
+    except Exception as e:
+        print(f"Transcription failed: {e}", file=sys.stderr)
+        raise typer.Exit(1)
+
+
+@app.command()
 def doctor():
     """Run sanity checks for the system."""
     setup_logging()
